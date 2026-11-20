@@ -14,6 +14,9 @@ const rub = new Intl.NumberFormat("ru-RU", {
 
 // Фон плитки зависит от названия, поэтому у каждого товара свой стабильный оттенок
 const TONES = ["#e7e1d4", "#dde4dd", "#e8dcd6", "#dbe1e8", "#eae4cf", "#e0dce6"];
+const AUTHORS = ["Zenny, Hiriika"]; 
+const STACK = ["React", "TypeScript", "ASP.NET Core", "PostgreSQL", "Redis", "RabbitMQ"];
+const REPO = "https://github.com/danilmazos-stack/ShopZenny";
 
 function toneOf(name: string) {
   let h = 0;
@@ -149,6 +152,15 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Порядковые номера без пропусков: считаются по возрастанию id
+  const numbers = useMemo(() => {
+    const map = new Map<number, number>();
+    [...items]
+      .sort((a, b) => a.id - b.id)
+      .forEach((p, i) => map.set(p.id, i + 1));
+    return map;
+  }, [items]);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = items.filter((p) => p.name.toLowerCase().includes(q));
@@ -221,7 +233,7 @@ export default function App() {
             {visible.map((p) => (
               <li key={p.id} className="card">
                 <div className="tile" style={{ background: toneOf(p.name) }}>
-                  <span className="sku">№ {String(p.id).padStart(3, "0")}</span>
+                  <span className="sku">№ {String(numbers.get(p.id) ?? 0).padStart(3, "0")}</span>
                   <span className="mono">{initials(p.name)}</span>
                   <div className="actions">
                     <button onClick={() => setEditing(p)}>Изменить</button>
@@ -238,6 +250,48 @@ export default function App() {
         )}
       </main>
 
+    <footer className="footer">
+      <div className="footer-inner">
+        <div className="footer-col">
+          <span className="footer-brand">ShopZenny</span>
+          <p>Учебный проект: каталог товаров на микросервисах.</p>
+        </div>
+
+        <div className="footer-col">
+          <h4>Авторы</h4>
+          <ul>
+            {AUTHORS.map((a) => (
+              <li key={a}>{a}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="footer-col">
+          <h4>Технологии</h4>
+          <ul>
+            {STACK.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="footer-col">
+          <h4>Проект</h4>
+          <ul>
+            <li>
+              <a href={REPO} target="_blank" rel="noreferrer">
+                Исходный код на GitHub
+              </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="footer-bottom">
+        © {new Date().getFullYear()} ShopZenny. Все права защищены.
+      </div>
+    </footer>
+      
       {editing && (
         <ProductDialog
           key={editing === "new" ? "new" : editing.id}
