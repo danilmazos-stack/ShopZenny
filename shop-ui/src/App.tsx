@@ -1,228 +1,257 @@
-import { useState, useEffect, type FormEvent } from 'react';
-import './App.css';
+import { useEffect, useMemo, useState } from "react";
 
-// ===== ТИПЫ =====
-interface Product {
-  id: number;
-  name: string;
-  price: number;
+type Product = { id: number; name: string; price: number };
+type SortKey = "new" | "price-asc" | "price-desc" | "name";
+type Toast = { text: string; error?: boolean };
+
+const API = `${import.meta.env.VITE_API_URL ?? "http://localhost:5001"}/api/products`;
+
+const rub = new Intl.NumberFormat("ru-RU", {
+  style: "currency",
+  currency: "RUB",
+  maximumFractionDigits: 0,
+});
+
+// Фон плитки зависит от названия, поэтому у каждого товара свой стабильный оттенок
+const TONES = ["#e7e1d4", "#dde4dd", "#e8dcd6", "#dbe1e8", "#eae4cf", "#e0dce6"];
+
+function toneOf(name: string) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TONES[h % TONES.length];
 }
 
-interface ProductDto {
-  name: string;
-  price: number;
+function initials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
 }
 
-interface ToastData {
-  message: string;
-  type: 'success' | 'error';
-}
+function ProductDialog({
+  product,
+  onSave,
+  onClose,
+}: {
+  product: Product | null;
+  onSave: (name: string, price: number, id?: number) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(product?.name ?? "");
+  const [price, setPrice] = useState(product ? String(product.price) : "");
+  const valid = name.trim().length > 0 && Number(price) > 0;
 
-const API_URL = 'http://localhost:5001/api/products';
-
-// ===== КОМПОНЕНТ: HEADER =====
-function Header({ onAddClick }: { onAddClick: () => void }) {
-  return (
-    <header className="header">
-      <div className="header-content">
-        <div className="logo">
-          <span className="logo-icon">🛍️</span>
-          <h1>ShopZenny</h1>
-        </div>
-        <button className="btn-add" onClick={onAddClick}>
-          <span className="btn-icon">+</span>
-          Добавить товар
-        </button>
-      </div>
-    </header>
-  );
-}
-
-// ===== КОМПОНЕНТ: PRODUCT CARD =====
-const EMOJI_MAP: Record<string, string> = {
-  mac: '💻', galaxy: '📱', пылесос: '🤖', xiaomi: '🤖', iphone: '📱', samsung: '📱'
-};
-
-function getEmoji(name: string): string {
-  const lower = name.toLowerCase();
-  for (const key of Object.keys(EMOJI_MAP)) {
-    if (lower.includes(key)) return EMOJI_MAP[key];
-  }
-  return '📦';
-}
-
-const COLORS = ['#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140'];
-
-function ProductCard({ product, onDelete }: { product: Product; onDelete: (id: number, name: string) => void }) {
-  const color = COLORS[product.id % COLORS.length];
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
-    <div className="card" style={{ '--accent': color } as React.CSSProperties}>
-      <div className="card-image">
-        <span className="card-emoji">{getEmoji(product.name)}</span>
-      </div>
-      <div className="card-body">
-        <h3 className="card-title">{product.name}</h3>
-        <p className="card-price">{product.price.toLocaleString('ru-RU')} ₽</p>
-        <button className="btn-delete" onClick={() => onDelete(product.id, product.name)}>
-          🗑 Удалить
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ===== КОМПОНЕНТ: PRODUCT LIST =====
-function ProductList({ products, onDelete }: { products: Product[]; onDelete: (id: number, name: string) => void }) {
-  return (
-    <div className="product-grid">
-      {products.map((product, i) => (
-        <div key={product.id} className="fade-in" style={{ animationDelay: `${i * 80}ms` }}>
-          <ProductCard product={product} onDelete={onDelete} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ===== КОМПОНЕНТ: PRODUCT FORM (MODAL) =====
-function ProductForm({ onSubmit, onClose }: { onSubmit: (product: ProductDto) => void; onClose: () => void }) {
-  const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !price) return;
-    onSubmit({ name: name.trim(), price: Number(price) });
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
-        <h2>Новый товар</h2>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Название</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Например: iPhone 15"
-              autoFocus
-            />
-          </div>
-          <div className="form-group">
-            <label>Цена (₽)</label>
-            <input
-              type="number"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              placeholder="0"
-              min="0"
-            />
-          </div>
-          <button type="submit" className="btn-submit" disabled={!name.trim() || !price}>
-            Добавить
+    <div className="backdrop" onMouseDown={onClose}>
+      <form
+        className="dialog"
+        onMouseDown={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (valid) onSave(name.trim(), Number(price), product?.id);
+        }}
+      >
+        <h2>{product ? "Изменить товар" : "Новый товар"}</h2>
+        <label>
+          Название
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label>
+          Цена, ₽
+          <input
+            type="number"
+            min="1"
+            step="1"
+            inputMode="numeric"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+        </label>
+        <div className="dialog-actions">
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Отмена
           </button>
-        </form>
-      </div>
+          <button type="submit" className="btn" disabled={!valid}>
+            Сохранить
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
 
-// ===== КОМПОНЕНТ: TOAST =====
-function Toast({ message, type }: ToastData) {
-  return (
-    <div className={`toast toast-${type}`}>
-      <span className="toast-icon">{type === 'success' ? '✅' : '❌'}</span>
-      {message}
-    </div>
-  );
-}
-
-// ===== ГЛАВНЫЙ КОМПОНЕНТ: APP =====
-function App() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [toast, setToast] = useState<ToastData | null>(null);
+export default function App() {
+  const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortKey>("new");
+  const [editing, setEditing] = useState<Product | "new" | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+  const notify = (text: string, error = false) => setToast({ text, error });
 
-  const fetchProducts = async () => {
+  async function load() {
     try {
-      const res = await fetch(API_URL);
-      const data: Product[] = await res.json();
-      setProducts(data);
+      const res = await fetch(API);
+      if (!res.ok) throw new Error();
+      setItems(await res.json());
     } catch {
-      showToast('Ошибка загрузки товаров', 'error');
+      notify("Не удалось загрузить каталог. Проверьте, что сервер запущен.", true);
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  async function save(name: string, price: number, id?: number) {
+    try {
+      const res = await fetch(id ? `${API}/${id}` : API, {
+        method: id ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, price }),
+      });
+      if (!res.ok) throw new Error();
+      setEditing(null);
+      notify(id ? "Изменения сохранены" : "Товар добавлен");
+      await load();
+    } catch {
+      notify("Не удалось сохранить товар", true);
+    }
+  }
+
+  async function remove(p: Product) {
+    if (!window.confirm(`Удалить «${p.name}»?`)) return;
+    try {
+      const res = await fetch(`${API}/${p.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      notify("Товар удалён");
+      await load();
+    } catch {
+      notify("Не удалось удалить товар", true);
+    }
+  }
 
   useEffect(() => {
-    fetchProducts();
+    load();
   }, []);
 
-  const addProduct = async (product: ProductDto) => {
-    try {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(product),
-      });
-      if (res.ok) {
-        await fetchProducts();
-        showToast(`Товар "${product.name}" добавлен!`);
-        setShowForm(false);
-      }
-    } catch {
-      showToast('Ошибка добавления', 'error');
-    }
-  };
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
-  const deleteProduct = async (id: number, name: string) => {
-    try {
-      const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setProducts((prev) => prev.filter((p) => p.id !== id));
-        showToast(`Товар "${name}" удалён`);
-      }
-    } catch {
-      showToast('Ошибка удаления', 'error');
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = items.filter((p) => p.name.toLowerCase().includes(q));
+    switch (sort) {
+      case "price-asc":
+        return [...list].sort((a, b) => a.price - b.price);
+      case "price-desc":
+        return [...list].sort((a, b) => b.price - a.price);
+      case "name":
+        return [...list].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      default:
+        return [...list].sort((a, b) => b.id - a.id);
     }
-  };
+  }, [items, query, sort]);
 
   return (
-    <div className="app">
-      <Header onAddClick={() => setShowForm(true)} />
+    <>
+      <header className="bar">
+        <div className="bar-inner">
+          <a className="brand" href="/">
+            ShopZenny
+          </a>
+          <input
+            className="search"
+            type="search"
+            placeholder="Поиск по каталогу"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <button className="btn" onClick={() => setEditing("new")}>
+            Добавить товар
+          </button>
+        </div>
+      </header>
 
-      <main className="main">
-        {loading ? (
-          <div className="loader">
-            <div className="spinner"></div>
-            <p>Загрузка товаров...</p>
+      <main className="page">
+        <div className="head">
+          <div>
+            <h1>Каталог</h1>
+            <p className="count">
+              {loading ? "Загрузка…" : `${visible.length} из ${items.length} позиций`}
+            </p>
           </div>
-        ) : products.length === 0 ? (
+          <label className="sort">
+            Сортировка
+            <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+              <option value="new">Сначала новые</option>
+              <option value="price-asc">Дешевле</option>
+              <option value="price-desc">Дороже</option>
+              <option value="name">По названию</option>
+            </select>
+          </label>
+        </div>
+
+        {loading ? (
+          <div className="grid">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="skeleton" />
+            ))}
+          </div>
+        ) : visible.length === 0 ? (
           <div className="empty">
-            <div className="empty-icon">🛒</div>
-            <h2>Товаров пока нет</h2>
-            <p>Нажмите «Добавить товар», чтобы создать первый</p>
+            <strong>{items.length === 0 ? "Каталог пока пуст" : "Ничего не найдено"}</strong>
+            {items.length === 0
+              ? "Добавьте первый товар кнопкой в шапке."
+              : "Попробуйте изменить запрос."}
           </div>
         ) : (
-          <ProductList products={products} onDelete={deleteProduct} />
+          <ul className="grid">
+            {visible.map((p) => (
+              <li key={p.id} className="card">
+                <div className="tile" style={{ background: toneOf(p.name) }}>
+                  <span className="sku">№ {String(p.id).padStart(3, "0")}</span>
+                  <span className="mono">{initials(p.name)}</span>
+                  <div className="actions">
+                    <button onClick={() => setEditing(p)}>Изменить</button>
+                    <button onClick={() => remove(p)}>Удалить</button>
+                  </div>
+                </div>
+                <div className="info">
+                  <h3>{p.name}</h3>
+                  <span className="price">{rub.format(p.price)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </main>
 
-      {showForm && <ProductForm onSubmit={addProduct} onClose={() => setShowForm(false)} />}
-      {toast && <Toast message={toast.message} type={toast.type} />}
-    </div>
+      {editing && (
+        <ProductDialog
+          key={editing === "new" ? "new" : editing.id}
+          product={editing === "new" ? null : editing}
+          onSave={save}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
+      {toast && (
+        <div className={`toast${toast.error ? " err" : ""}`} role="status">
+          {toast.text}
+        </div>
+      )}
+    </>
   );
 }
-
-export default App;
