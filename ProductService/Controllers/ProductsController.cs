@@ -9,6 +9,14 @@ public class ProductsController(ShopContext db, IDistributedCache cache, EventPu
 {
     private const string CacheKey = "products:all";
 
+    // Пропускаем только http(s)-адреса и пути вида /images/...
+private static string? CleanUrl(string? url)
+{
+    url = url?.Trim();
+    if (string.IsNullOrEmpty(url)) return null;
+    return url.StartsWith("https://") || url.StartsWith("http://") || url.StartsWith("/") ? url : null;
+}
+
     // GET /api/products: сначала смотрим в Redis, потом в базу
     [HttpGet]
     public async Task<ActionResult<List<Product>>> GetAll()
@@ -38,8 +46,7 @@ public class ProductsController(ShopContext db, IDistributedCache cache, EventPu
     [HttpPost]
     public async Task<ActionResult<Product>> Create(ProductDto dto)
     {
-        var product = new Product { Name = dto.Name, Price = dto.Price };
-        db.Products.Add(product);
+        var product = new Product { Name = dto.Name, Price = dto.Price, ImageUrl = CleanUrl(dto.ImageUrl) };        db.Products.Add(product);
         await db.SaveChangesAsync();
 
         await cache.RemoveAsync(CacheKey);
@@ -56,6 +63,7 @@ public class ProductsController(ShopContext db, IDistributedCache cache, EventPu
 
         product.Name = dto.Name;
         product.Price = dto.Price;
+        product.ImageUrl = CleanUrl(dto.ImageUrl);
         await db.SaveChangesAsync();
 
         await cache.RemoveAsync(CacheKey);

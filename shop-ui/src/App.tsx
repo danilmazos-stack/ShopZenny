@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 
-type Product = { id: number; name: string; price: number };
+type Product = { id: number; name: string; price: number; imageUrl?: string | null };
 type SortKey = "new" | "price-asc" | "price-desc" | "name";
+type Theme = "system" | "light" | "dark";
 type Toast = { text: string; error?: boolean };
 
 const API = `${import.meta.env.VITE_API_URL ?? "http://localhost:5001"}/api/products`;
+
+const AUTHORS = ["Zenny"];
+const STACK = ["React", "TypeScript", "ASP.NET Core", "PostgreSQL", "Redis", "RabbitMQ"];
+const REPO = "https://github.com/danilmazos-stack/ShopZenny";
+
+const THEMES: { value: Theme; label: string }[] = [
+  { value: "system", label: "Авто" },
+  { value: "light", label: "День" },
+  { value: "dark", label: "Ночь" },
+];
 
 const rub = new Intl.NumberFormat("ru-RU", {
   style: "currency",
@@ -12,16 +23,11 @@ const rub = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 0,
 });
 
-// Фон плитки зависит от названия, поэтому у каждого товара свой стабильный оттенок
-const TONES = ["#e7e1d4", "#dde4dd", "#e8dcd6", "#dbe1e8", "#eae4cf", "#e0dce6"];
-const AUTHORS = ["Zenny, Hiriika"]; 
-const STACK = ["React", "TypeScript", "ASP.NET Core", "PostgreSQL", "Redis", "RabbitMQ"];
-const REPO = "https://github.com/danilmazos-stack/ShopZenny";
-
-function toneOf(name: string) {
+// Оттенок плитки зависит от названия, поэтому у каждого товара свой стабильный цвет
+function hueOf(name: string) {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return TONES[h % TONES.length];
+  return h % 360;
 }
 
 function initials(name: string) {
@@ -34,17 +40,63 @@ function initials(name: string) {
     .toUpperCase();
 }
 
+function useTheme() {
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      const saved = localStorage.getItem("theme");
+      return saved === "light" || saved === "dark" ? saved : "system";
+    } catch {
+      return "system";
+    }
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    try {
+      if (theme === "system") {
+        root.removeAttribute("data-theme");
+        localStorage.removeItem("theme");
+      } else {
+        root.setAttribute("data-theme", theme);
+        localStorage.setItem("theme", theme);
+      }
+    } catch {
+      /* хранилище недоступно: тема просто не запомнится */
+    }
+  }, [theme]);
+
+  return [theme, setTheme] as const;
+}
+
+// Картинка товара; если её нет или она не загрузилась, показываем инициалы
+function Photo({ product }: { product: Product }) {
+  const [failed, setFailed] = useState(false);
+  if (product.imageUrl && !failed) {
+    return (
+      <img
+        className="photo"
+        src={product.imageUrl}
+        alt={product.name}
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return <span className="mono">{initials(product.name)}</span>;
+}
+
 function ProductDialog({
   product,
   onSave,
   onClose,
 }: {
   product: Product | null;
-  onSave: (name: string, price: number, id?: number) => void;
+  onSave: (name: string, price: number, imageUrl: string, id?: number) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(product?.name ?? "");
   const [price, setPrice] = useState(product ? String(product.price) : "");
+  const [imageUrl, setImageUrl] = useState(product?.imageUrl ?? "");
   const valid = name.trim().length > 0 && Number(price) > 0;
 
   useEffect(() => {
@@ -60,7 +112,7 @@ function ProductDialog({
         onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          if (valid) onSave(name.trim(), Number(price), product?.id);
+          if (valid) onSave(name.trim(), Number(price), imageUrl.trim(), product?.id);
         }}
       >
         <h2>{product ? "Изменить товар" : "Новый товар"}</h2>
@@ -77,6 +129,14 @@ function ProductDialog({
             inputMode="numeric"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
+          />
+        </label>
+        <label>
+          Ссылка на фото (необязательно)
+          <input
+            placeholder="https://… или /images/phone.jpg"
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
           />
         </label>
         <div className="dialog-actions">
@@ -99,6 +159,7 @@ export default function App() {
   const [sort, setSort] = useState<SortKey>("new");
   const [editing, setEditing] = useState<Product | "new" | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [theme, setTheme] = useTheme();
 
   const notify = (text: string, error = false) => setToast({ text, error });
 
@@ -114,12 +175,12 @@ export default function App() {
     }
   }
 
-  async function save(name: string, price: number, id?: number) {
+  async function save(name: string, price: number, imageUrl: string, id?: number) {
     try {
       const res = await fetch(id ? `${API}/${id}` : API, {
         method: id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, price }),
+        body: JSON.stringify({ name, price, imageUrl: imageUrl || null }),
       });
       if (!res.ok) throw new Error();
       setEditing(null);
@@ -180,7 +241,16 @@ export default function App() {
     <>
       <header className="bar">
         <div className="bar-inner">
-          <a className="brand" href="/">
+          <a
+            className="brand"
+            href="/"
+            onClick={(e) => {
+              e.preventDefault();
+              setQuery("");
+              setSort("new");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          >
             ShopZenny
           </a>
           <input
@@ -190,6 +260,18 @@ export default function App() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          <div className="theme" role="group" aria-label="Тема оформления">
+            {THEMES.map((t) => (
+              <button
+                key={t.value}
+                className={theme === t.value ? "on" : ""}
+                aria-pressed={theme === t.value}
+                onClick={() => setTheme(t.value)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <button className="btn" onClick={() => setEditing("new")}>
             Добавить товар
           </button>
@@ -232,9 +314,14 @@ export default function App() {
           <ul className="grid">
             {visible.map((p) => (
               <li key={p.id} className="card">
-                <div className="tile" style={{ background: toneOf(p.name) }}>
-                  <span className="sku">№ {String(numbers.get(p.id) ?? 0).padStart(3, "0")}</span>
-                  <span className="mono">{initials(p.name)}</span>
+                <div
+                  className="tile"
+                  style={{ background: `hsl(${hueOf(p.name)} 22% var(--tile-l))` }}
+                >
+                  <Photo key={p.imageUrl ?? ""} product={p} />
+                  <span className="sku">
+                    № {String(numbers.get(p.id) ?? 0).padStart(3, "0")}
+                  </span>
                   <div className="actions">
                     <button onClick={() => setEditing(p)}>Изменить</button>
                     <button onClick={() => remove(p)}>Удалить</button>
@@ -250,48 +337,48 @@ export default function App() {
         )}
       </main>
 
-    <footer className="footer">
-      <div className="footer-inner">
-        <div className="footer-col">
-          <span className="footer-brand">ShopZenny</span>
-          <p>Учебный проект: каталог товаров на микросервисах.</p>
+      <footer className="footer">
+        <div className="footer-inner">
+          <div className="footer-col">
+            <span className="footer-brand">ShopZenny</span>
+            <p>Учебный проект: каталог товаров на микросервисах.</p>
+          </div>
+
+          <div className="footer-col">
+            <h4>Авторы</h4>
+            <ul>
+              {AUTHORS.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="footer-col">
+            <h4>Технологии</h4>
+            <ul>
+              {STACK.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="footer-col">
+            <h4>Проект</h4>
+            <ul>
+              <li>
+                <a href={REPO} target="_blank" rel="noreferrer">
+                  Исходный код на GitHub
+                </a>
+              </li>
+            </ul>
+          </div>
         </div>
 
-        <div className="footer-col">
-          <h4>Авторы</h4>
-          <ul>
-            {AUTHORS.map((a) => (
-              <li key={a}>{a}</li>
-            ))}
-          </ul>
+        <div className="footer-bottom">
+          © {new Date().getFullYear()} ShopZenny. Все права защищены.
         </div>
+      </footer>
 
-        <div className="footer-col">
-          <h4>Технологии</h4>
-          <ul>
-            {STACK.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="footer-col">
-          <h4>Проект</h4>
-          <ul>
-            <li>
-              <a href={REPO} target="_blank" rel="noreferrer">
-                Исходный код на GitHub
-              </a>
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <div className="footer-bottom">
-        © {new Date().getFullYear()} ShopZenny. Все права защищены.
-      </div>
-    </footer>
-      
       {editing && (
         <ProductDialog
           key={editing === "new" ? "new" : editing.id}
